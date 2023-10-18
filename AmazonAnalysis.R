@@ -3,7 +3,8 @@ library(tidymodels)
 library(embed)
 library(DataExplorer)
 library(GGally)
-
+library(discrim)
+install.packages("discrim")
 
 #Read in the data
 amazon_train <- vroom("./train.csv") %>% 
@@ -135,17 +136,85 @@ Random_preds <-tibble(id =amazon_test$id,
 
 vroom_write(x=Random_preds, file="./AmazonRFPreds.csv", delim=",")
 
+##############
+
+my_mod <- rand_forest(mtry = tune(),
+                      min_n = tune(),
+                      trees = 500) %>% 
+  set_engine("ranger") %>% 
+  set_mode("classification")
+
+A_Recipe <- recipe(ACTION~., data = amazon_train) %>% 
+  step_mutate_at(all_numeric_predictors(),fn= factor) %>% 
+  step_other(all_nominal_predictors(), threshold = .01) %>% 
+  step_dummy(all_nominal_predictors())
 
 
+RF_amazon_workflow <- workflow() %>% 
+  add_recipe(A_Recipe) %>% 
+  add_model(my_mod)
+
+tuning_grid <- grid_regular(mtry(range = c(1,9)),
+                            min_n(),
+                            levels = 5)
+
+folds <- vfold_cv(amazon_train, v= 5, repeats = 1)
 
 
+CV_results <- RF_amazon_workflow %>% 
+  tune_grid(resamples=folds,
+            grid=tuning_grid,
+            metrics=metric_set(roc_auc))
+
+bestTune <- CV_results %>% 
+  select_best("roc_auc")
+
+final_wf <-
+  RF_amazon_workflow %>% 
+  finalize_workflow(bestTune) %>% 
+  fit(data = amazon_train)
+
+Random_forest_preds <-final_wf %>% 
+  predict(new_data = amazon_test, type = "prob")
+
+Random_preds <-tibble(id =amazon_test$id,
+                      ACTION = Random_forest_preds$.pred_1)
+
+vroom_write(x=Random_preds, file="./AmazonRFPreds1.csv", delim=",")
+
+##################
+# Naive Bayes
+
+nb_model <- naive_Bayes(Laplace = tune(), smoothness = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("naivebayes")
+
+nb_wf <- workflow() %>% 
+  add_recipe(My_Recipe) %>% 
+  add_model(nb_model)
+
+tuning_grid <- grid_regular(Laplace(),
+                            smoothness())
+
+folds <- vfold_cv(amazon_train, v= 5, repeats = 1)
 
 
+CV_results <- nb_wf %>% 
+  tune_grid(resamples=folds,
+            grid=tuning_grid,
+            metrics=metric_set(roc_auc))
+
+bestTune <- CV_results %>% 
+  select_best("roc_auc")
 
 
+final_wf <- nb_wf %>% finalize_workflow(bestTune) %>% 
+  fit(data = amazon_train)
 
+NB_preds <- final_wf %>% 
+  predict(nb_wf, new_data = amazon_test, type = "prob")
 
-
-
-
+Naive_preds <- tibble(id =amazon_test$id,
+                      ACTION = NB_preds$.pred_1)
+vroom_write(x=Naive_preds, file="./AmazonNBPreds1.csv", delim=",")
 
