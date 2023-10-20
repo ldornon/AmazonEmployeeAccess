@@ -5,6 +5,8 @@ library(DataExplorer)
 library(GGally)
 library(discrim)
 install.packages("discrim")
+library(kknn)
+install.packages("kknn")
 
 #Read in the data
 amazon_train <- vroom("./train.csv") %>% 
@@ -217,4 +219,47 @@ NB_preds <- final_wf %>%
 Naive_preds <- tibble(id =amazon_test$id,
                       ACTION = NB_preds$.pred_1)
 vroom_write(x=Naive_preds, file="./AmazonNBPreds1.csv", delim=",")
+
+
+##################
+# K-Nearest Neighbor
+##################
+
+knn_model <- nearest_neighbor(neighbors = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("kknn")
+
+knn_wf <- workflow() %>% 
+  add_recipe(My_Recipe) %>% 
+  add_model(knn_model)
+
+tuning_grid <- grid_regular(neighbors())
+folds <- vfold_cv(amazon_train, v = 5, repeats = 1)
+
+CV_results <- knn_wf %>% 
+  tune_grid(resamples = folds, 
+            grid = tuning_grid, 
+            metrics = metric_set(roc_auc))
+
+bestTune <- CV_results %>% 
+  select_best("roc_auc")
+
+final_wf <- knn_wf %>% finalize_workflow(bestTune) %>% 
+  fit(data = amazon_train)
+
+KNN_preds <- final_wf %>% 
+  predict(new_data = amazon_test, type = "prob")
+
+KNearest_preds <- tibble(id = amazon_test$id, 
+                       ACTION = KNN_preds$.pred_1)
+vroom_write(x = KNearest_preds, file ="./AmazonKNNPreds.csv", delim = ",")
+
+
+
+
+
+
+
+
+
 
